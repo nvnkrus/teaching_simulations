@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mô Phỏng Con Lắc Lò Xo</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css"></script>
+    <style>
+        body { margin: 0; padding: 20px; background: #f3f4f6; font-family: Arial, sans-serif; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .controls { display: flex; gap: 20px; margin: 20px 0; flex-wrap: wrap; }
+        .control-group { display: flex; flex-direction: column; align-items: center; }
+        .control-group label { font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 5px; }
+        .control-group input[type="range"] { width: 120px; }
+        .control-group span { font-size: 12px; color: #6b7280; margin-top: 2px; }
+        .buttons { display: flex; gap: 15px; margin: 20px 0; }
+        .btn { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-success { background: #10b981; color: white; }
+        .btn-success:hover { background: #059669; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .canvas-container { background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin: 20px 0; }
+        .instructions { text-align: center; color: #6b7280; margin-top: 20px; }
+        .instructions p { margin: 5px 0; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        const SpringPendulumSimulator = () => {
+            const canvasRef = useRef(null);
+            const animationRef = useRef(null);
+            const [isRunning, setIsRunning] = useState(false);
+            const [isDragging, setIsDragging] = useState(false);
+            const [springConstant, setSpringConstant] = useState(100);
+            const [mass, setMass] = useState(1);
+            const [damping, setDamping] = useState(0.99);
+            
+            const physicsRef = useRef({
+                position: { x: 400, y: 300 },
+                velocity: { x: 0, y: 0 },
+                equilibrium: { x: 400, y: 300 },
+                lastTime: 0
+            });
+
+            const ANCHOR_POINT = { x: 400, y: 100 };
+            const MASS_RADIUS = 20;
+            const dt = 0.016;
+
+            const drawSpring = (ctx, start, end, coils = 12) => {
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
+                const length = Math.sqrt(dx * dx + dy * dy);
+                const springWidth = 20;
+                
+                ctx.strokeStyle = '#4a90e2';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                
+                for (let i = 0; i <= coils; i++) {
+                    const t = i / coils;
+                    const x = start.x + dx * t;
+                    const y = start.y + dy * t;
+                    
+                    const perpX = -dy / length * springWidth * Math.sin(i * Math.PI);
+                    const perpY = dx / length * springWidth * Math.sin(i * Math.PI);
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x + perpX, y + perpY);
+                    }
+                }
+                
+                ctx.stroke();
+            };
+
+            const draw = useCallback(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                const physics = physicsRef.current;
+                
+                ctx.fillStyle = '#666';
+                ctx.beginPath();
+                ctx.arc(ANCHOR_POINT.x, ANCHOR_POINT.y, 8, 0, 2 * Math.PI);
+                ctx.fill();
+                
+                drawSpring(ctx, ANCHOR_POINT, physics.position);
+                
+                ctx.fillStyle = isDragging ? '#ff6b6b' : '#e74c3c';
+                ctx.strokeStyle = '#c0392b';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(physics.position.x, physics.position.y, MASS_RADIUS, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.stroke();
+                
+                if (isRunning && (Math.abs(physics.velocity.x) > 1 || Math.abs(physics.velocity.y) > 1)) {
+                    ctx.strokeStyle = '#27ae60';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(physics.position.x, physics.position.y);
+                    ctx.lineTo(
+                        physics.position.x + physics.velocity.x * 0.1,
+                        physics.position.y + physics.velocity.y * 0.1
+                    );
+                    ctx.stroke();
+                }
+                
+                ctx.fillStyle = '#2c3e50';
+                ctx.font = '16px Arial';
+                ctx.fillText(`Độ cứng lò xo: ${springConstant}`, 20, 30);
+                ctx.fillText(`Khối lượng: ${mass} kg`, 20, 55);
+                ctx.fillText(`Vận tốc: ${Math.sqrt(physics.velocity.x**2 + physics.velocity.y**2).toFixed(1)} px/s`, 20, 80);
+                
+            }, [isDragging, isRunning, springConstant, mass]);
+
+            const updatePhysics = useCallback(() => {
+                if (isDragging || !isRunning) return;
+                
+                const physics = physicsRef.current;
+                
+                const dx = physics.position.x - physics.equilibrium.x;
+                const dy = physics.position.y - physics.equilibrium.y;
+                
+                const forceX = -springConstant * dx;
+                const forceY = -springConstant * dy;
+                
+                const accelX = forceX / mass;
+                const accelY = forceY / mass;
+                
+                physics.velocity.x += accelX * dt;
+                physics.velocity.y += accelY * dt;
+                
+                physics.velocity.x *= damping;
+                physics.velocity.y *= damping;
+                
+                physics.position.x += physics.velocity.x * dt;
+                physics.position.y += physics.velocity.y * dt;
+                
+                if (Math.abs(physics.velocity.x) < 0.1 && Math.abs(physics.velocity.y) < 0.1 &&
+                    Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+                    physics.velocity.x = 0;
+                    physics.velocity.y = 0;
+                    setIsRunning(false);
+                }
+            }, [isDragging, isRunning, springConstant, mass, damping]);
+
+            useEffect(() => {
+                const animate = () => {
+                    updatePhysics();
+                    draw();
+                    animationRef.current = requestAnimationFrame(animate);
+                };
+                
+                animate();
+                return () => {
+                    if (animationRef.current) {
+                        cancelAnimationFrame(animationRef.current);
+                    }
+                };
+            }, [updatePhysics, draw]);
+
+            const getMousePos = (e) => {
+                const canvas = canvasRef.current;
+                const rect = canvas.getBoundingClientRect();
+                return {
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top
+                };
+            };
+
+            const handleMouseDown = (e) => {
+                const mousePos = getMousePos(e);
+                const physics = physicsRef.current;
+                const dx = mousePos.x - physics.position.x;
+                const dy = mousePos.y - physics.position.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance <= MASS_RADIUS) {
+                    setIsDragging(true);
+                    setIsRunning(false);
+                    physics.velocity = { x: 0, y: 0 };
+                }
+            };
+
+            const handleMouseMove = (e) => {
+                if (!isDragging) return;
+                const mousePos = getMousePos(e);
+                physicsRef.current.position = { x: mousePos.x, y: mousePos.y };
+            };
+
+            const handleMouseUp = () => {
+                if (isDragging) {
+                    setIsDragging(false);
+                    setIsRunning(true);
+                }
+            };
+
+            const resetSimulation = () => {
+                setIsRunning(false);
+                setIsDragging(false);
+                physicsRef.current = {
+                    position: { x: 400, y: 300 },
+                    velocity: { x: 0, y: 0 },
+                    equilibrium: { x: 400, y: 300 },
+                    lastTime: 0
+                };
+            };
+
+            return React.createElement('div', { className: 'container' },
+                React.createElement('h1', { style: { textAlign: 'center', fontSize: '32px', fontWeight: 'bold', color: '#1f2937', marginBottom: '30px' }}, 'Mô Phỏng Con Lắc Lò Xo'),
+                
+                React.createElement('div', { className: 'canvas-container' },
+                    React.createElement('canvas', {
+                        ref: canvasRef,
+                        width: 800,
+                        height: 600,
+                        style: { border: '1px solid #d1d5db', borderRadius: '5px', cursor: 'pointer', display: 'block', margin: '0 auto' },
+                        onMouseDown: handleMouseDown,
+                        onMouseMove: handleMouseMove,
+                        onMouseUp: handleMouseUp,
+                        onMouseLeave: handleMouseUp
+                    })
+                ),
+                
+                React.createElement('div', { className: 'controls' },
+                    React.createElement('div', { className: 'control-group' },
+                        React.createElement('label', null, 'Độ cứng lò xo (k)'),
+                        React.createElement('input', {
+                            type: 'range',
+                            min: 20,
+                            max: 200,
+                            value: springConstant,
+                            onChange: (e) => setSpringConstant(Number(e.target.value)),
+                            disabled: isRunning || isDragging
+                        }),
+                        React.createElement('span', null, springConstant)
+                    ),
+                    
+                    React.createElement('div', { className: 'control-group' },
+                        React.createElement('label', null, 'Khối lượng (m)'),
+                        React.createElement('input', {
+                            type: 'range',
+                            min: 0.5,
+                            max: 3,
+                            step: 0.1,
+                            value: mass,
+                            onChange: (e) => setMass(Number(e.target.value)),
+                            disabled: isRunning || isDragging
+                        }),
+                        React.createElement('span', null, `${mass} kg`)
+                    ),
+                    
+                    React.createElement('div', { className: 'control-group' },
+                        React.createElement('label', null, 'Lực cản'),
+                        React.createElement('input', {
+                            type: 'range',
+                            min: 0.95,
+                            max: 1,
+                            step: 0.001,
+                            value: damping,
+                            onChange: (e) => setDamping(Number(e.target.value)),
+                            disabled: isRunning || isDragging
+                        }),
+                        React.createElement('span', null, damping)
+                    )
+                ),
+                
+                React.createElement('div', { className: 'buttons', style: { justifyContent: 'center' }},
+                    React.createElement('button', {
+                        onClick: resetSimulation,
+                        className: 'btn btn-primary'
+                    }, 'Reset'),
+                    
+                    React.createElement('button', {
+                        onClick: () => setIsRunning(!isRunning),
+                        disabled: isDragging,
+                        className: `btn ${isRunning ? 'btn-danger' : 'btn-success'}`
+                    }, isRunning ? 'Dừng' : 'Bắt đầu')
+                ),
+                
+                React.createElement('div', { className: 'instructions' },
+                    React.createElement('p', null, React.createElement('strong', null, 'Hướng dẫn:')),
+                    React.createElement('p', null, '• Click và kéo khối lượng đỏ để thay đổi vị trí'),
+                    React.createElement('p', null, '• Thả chuột để bắt đầu dao động'),
+                    React.createElement('p', null, '• Điều chỉnh độ cứng lò xo, khối lượng và lực cản để thay đổi chuyển động'),
+                    React.createElement('p', null, '• Vector màu xanh hiển thị hướng và độ lớn vận tốc')
+                )
+            );
+        };
+
+        ReactDOM.render(React.createElement(SpringPendulumSimulator), document.getElementById('root'));
+    </script>
+</body>
+</html>
